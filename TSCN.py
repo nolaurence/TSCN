@@ -7,35 +7,20 @@ from sklearn.metrics import f1_score, roc_auc_score
 np.random.seed(1)
 # tf.enable_eager_execution()
 
-parser = argparse.ArgumentParser()
-
-parser.add_argument('--dataset', type=str, default='kaggle', help='set aside')
-parser.add_argument('--pooling', type=str, default='adamic', help='which pooling method to use')
-parser.add_argument('--n_epochs', type=int, default=10, help=' the number of epochs')
-parser.add_argument('--sample_size', type=int, default=3, help='the number of child node of every node')
-parser.add_argument('--dim', type=int, default=32, help='number of embedding vector, choose in [8, 16, 32]')
-parser.add_argument('--k', type=int, default=3, help='the depth of tree')
-parser.add_argument('--batch_size', type=int, default=128, help='batch size')
-parser.add_argument('--l2_weight', type=float, default=1e-6, help='weight of l2 regularization in 1e-6~1')
-parser.add_argument('--lr', type=float, default=1e-2, help='learning rate')
-
-args = parser.parse_args()
-
-
 # TSCN(args, n_users, n_items, adj_item, adj_adam, user2item_dict)
-def load_data():
-    user2item = np.load('newdata/user2item.npy', allow_pickle=True).item()
+def load_data(path):
+    user2item = np.load(path + 'user2item.npy', allow_pickle=True).item()
     users = set(user2item.keys())
-    items = list(np.load('newdata/items.npy', allow_pickle=True))
+    items = list(np.load(path + 'items.npy', allow_pickle=True))
     n_item = len(items)
     items = list(range(len(items)))
     n_user = len(users)
 
-    adj_item = np.load('newdata/adj_item.npy', allow_pickle=True)
-    adj_adam = np.load('newdata/adj_adam.npy', allow_pickle=True)
+    adj_item = np.load(path + 'adj_item.npy', allow_pickle=True)
+    adj_adam = np.load(path + 'adj_adam.npy', allow_pickle=True)
     # user2item = np.load('newdata/user2item.npy', allow_pickle=True).item()
-    train_data = np.load('newdata/traindata.npy', allow_pickle=True)
-    test_data = np.load('newdata/testdata.npy', allow_pickle=True)
+    train_data = np.load(path + 'train_data.npy', allow_pickle=True)
+    test_data = np.load(path + 'test_data.npy', allow_pickle=True)
     return n_user, n_item, items, adj_item, adj_adam, user2item, train_data, test_data
 
 
@@ -189,14 +174,13 @@ class MaxPooling(object):
 
 
 class fc_layer(object):
-    def __init__(self, batch_size, dim, dropout=0., act=tf.nn.softmax, name=None):
+    def __init__(self, batch_size, dim, dropout=0., name=None):
         if not name:
             layer = self.__class__.__name__.lower()
             name = layer + '_' + str(get_layer_id(layer))
         self.batch_size = batch_size
         self.dim = dim
         self.dropout = dropout
-        self.act = act
         self.name = name
         with tf.variable_scope(self.name):
             self.wfc = tf.get_variable(shape=[self.dim * 2, self.dim],
@@ -229,15 +213,15 @@ class fc_layer(object):
         output2 = tf.reshape(output1, [-1, self.dim])
         output = tf.matmul(output2, self.wd)
         output = tf.reshape(output, [self.batch_size])
-        output = self.act(output)
+        # output = self.act(output)
         return output
 
 
 class TSCN(object):
-    def __init__(self, args, n_users, n_items, adj_item, adj_adam, user2item_dict):
+    def __init__(self, args, n_items, adj_item, adj_adam, user2item_dict):
         self._parse_args(args, adj_item, adj_adam, user2item_dict)
         self._build_inputs()
-        self._build_model(args, n_users, n_items)
+        self._build_model(args, n_items)
         self._build_train()
 
     @staticmethod
@@ -248,6 +232,7 @@ class TSCN(object):
         self.adj_item = adj_item
         self.adj_adam = adj_adam
         self.user2item_dict = user2item_dict
+        self.userlist = set(user2item_dict.keys())
 
         self.k = args.k
         self.batch_size = args.batch_size
@@ -270,11 +255,12 @@ class TSCN(object):
         self.item_indices = tf.placeholder(dtype=tf.int32, shape=[None], name='item_indices')
         self.labels = tf.placeholder(dtype=tf.float32, shape=[None], name='labels')
 
-    def _build_model(self, args, n_users, n_items):
+    def _build_model(self, args, n_items):
         self.item_embedding_matrix = tf.get_variable(
             shape=[n_items, self.dim], initializer=TSCN.get_initializer(), name='item_embedding_matrix')
-        self.user_embedding_matrix = tf.get_variable(
-            shape=[n_users, self.dim], initializer=TSCN.get_initializer(), name='user_embedding_matrix')
+        self.user_embedding_matrix = self.user_emb_initializer()
+        # self.user_embedding_matrix = tf.get_variable(
+        #     shape=[n_users, self.dim], initializer=TSCN.get_initializer(), name='user_embedding_matrix')
         
         # 解释：为何这里的大小是batch_size x dim:
         # 在训练的过程中，我们输入的user item interaction graph分为三行
@@ -295,32 +281,26 @@ class TSCN(object):
         # fc layer
         self.fclayer = fc_layer(self.batch_size, self.dim)
         self.output = self.fclayer(self.user_embeddings, self.item_embeddings)
+        self.output_normalized = tf.nn.softmax(self.output)
 
     # 添加了一个n_users, 用户id的
 
     # 用户向量的初始化函数
-    # def user_emb_initializer(self, n_user, ):
-    #     print('initializing user embeddings ...')
-    #     i = 0
-    #     uservec = []
-    #     for u in userindex:
-    #         itemids = self.user2item_dict[u]
-    #         if itemindex[0] in itemids:
-    #             itemids.remove(itemindex[0])
-    #             length = len(itemids)
-    #             itemids = tf.Tensor(itemids)
-    #             itemvectors = tf.gather(self.adj_item, itemids)
-    #             user_emb = tf.divide(tf.reduce_sum(itemvectors, axis=-1), length)
-    #         else:
-    #             itemvectors = tf.gather(self.adj_item, itemids)
-    #             user_emb = tf.divide(tf.reduce_sum(itemvectors, axis=-1), length)
-    #         uservec.append(user_emb)
-    #     output = tf.reshape(uservec, [self.batch_size, self.dim])
-    #
-    #     user_emb_matrix = list()
-    #     for user in range(n_user):
-    #
-    #     return output
+    def user_emb_initializer(self):
+        print('initializing user embeddings ...')
+        user_emb_matrix = []
+        x = 0
+        for user in self.userlist:
+            print('\r', '{}/{}'.format(x, len(self.userlist)), end='')
+            x += 1
+            item_index = self.user2item_dict[user]
+            item_emb = [tf.nn.embedding_lookup(self.item_embedding_matrix, item) for item in item_index]
+            item_emb = tf.reduce_mean(item_emb, axis=-1)
+            user_emb_matrix.append(item_emb)
+        user_emb_matrix = np.array(user_emb_matrix)
+        print(user_emb_matrix.shape)
+
+        return user_emb_matrix
 
     def get_childnodes(self, seeds):
         print('geting childnodes of vertexes ...')
@@ -380,6 +360,7 @@ class TSCN(object):
             self.l2_loss += tf.nn.l2_loss(p.weights)
         self.l2_loss += tf.nn.l2_loss(self.fclayer.wfc) + tf.nn.l2_loss(self.fclayer.wd)
         self.loss = self.base_loss + self.l2_weight * self.l2_loss
+        # self.loss = self.base_loss
 
         # 优化器
         self.optimizer = tf.train.AdamOptimizer(self.lr).minimize(self.loss)
@@ -396,7 +377,7 @@ class TSCN(object):
         return auc, f1
     
     def get_scores(self, sess, feed_dict):
-        return sess.run([self.item_indices, self.output], feed_dict)
+        return sess.run([self.item_indices, self.output_normalized], feed_dict)
 
 # 计算过程代码
 # __init__(self, args, n_users, n_items, adj_item, adj_adam, user2item_dict):
@@ -416,36 +397,55 @@ def get_feed_dict(model, data, start, end):
 
 
 # is_train的类型为bool
+# def get_user_record(data, is_train):
+#     user_history_dict = dict()
+#     for interaction in data:
+#         user = interaction[0]
+#         item = interaction[1]
+#         label = interaction[2]
+#         if is_train or label == 1:
+#             if user not in user_history_dict:
+#                 user_history_dict[user] = set()
+#             user_history_dict[user].add(item)
+#     return user_history_dict
 def get_user_record(data, is_train):
-    user_history_dict = dict()
-    for interaction in data:
-        user = interaction[0]
-        item = interaction[1]
-        label = interaction[2]
+    user_dict = dict()
+    for idx in range(data.shape[0]):
+        user = data[idx][0]
+        item = data[idx][1]
+        label = data[idx][2]
         if is_train or label == 1:
-            if user not in user_history_dict:
-                user_history_dict[user] = set()
-            user_history_dict[user].add(item)
-    return user_history_dict
+            if user not in user_dict:
+                user_dict[user] = set()
+            user_dict[user].add(item)
+    return user_dict
 
-def topn_settings(train_data, test_data, n_item):
+
+def topn_settings(train_data, test_data):
     train_record = get_user_record(train_data, True)
     test_record = get_user_record(test_data, False)
     user_list = list(set(train_record.keys()) & set(test_record.keys()))
-    item_set = set(list(range(n_item)))
-    return user_list, train_record, test_record, item_set
+    return user_list, train_record, test_record
 
 
 def topn_eval(sess, model, user_list, train_record, test_record, item_set, n, batch_size):
-    HR_precision_list = list()
-    NDCG_precision_list = list()
+    # HR_precision_list = list()
+    # NDCG_precision_list = list()
 
     Z = 0
-    for i in range(n):
-        Z += 1 / (math.log2(i + 2))
+    for s in range(n):
+        Z += 1 / (math.log2(s + 2))
     Z = 1 / Z
 
+    print('operating on top n evaluating ...')
+    print('n_user: {}'.format(len(user_list)))
+    idx = 0
+    HR = 0
+    NDCG = 0
     for user in user_list:
+        idx += 1
+        print('\r', '{}/{}'.format(idx, len(user_list)), end='')
+        # print('\r', i, end='')
         test_item_list = list(item_set - train_record[user])
         item_score_map = dict()
         start = 0
@@ -457,30 +457,34 @@ def topn_eval(sess, model, user_list, train_record, test_record, item_set, n, ba
         
         # padding the last incomplete minibatch if exists
         if start < len(test_item_list):
-            items, scores = model.get_scores(sess, {model.user_indices: [user] * batch_size, 
+            items, scores = model.get_scores(sess, {model.user_indices: [user] * batch_size,
                                                     model.item_indices: test_item_list[start:] + [test_item_list[-1]] * (batch_size - len(test_item_list) + start)})
             for item, score in zip(items, scores):
                 item_score_map[item] = score
-        
+
         item_score_pair_sorted = sorted(item_score_map.items(), key=lambda x: x[1], reverse=True)
         item_sorted = [i[0] for i in item_score_pair_sorted]
-        
+        # print(item_sorted[:n])
+        # print(test_record[user])
+
         hit_num = len(set(item_sorted[:n]) & test_record[user])
         # HR result
         precision1 = hit_num / n
-        HR_precision_list.append(precision1)
+        HR += precision1
         
-        # NDCG resul\
+        # NDCG result
         sum = 0
         recommended_list = list(item_sorted[:n])
         hit_set = set(item_sorted[:n]) & test_record[user]
-        for i in range(len(recommended_list)):
-            if recommended_list[i] in hit_set:
-                sum += 1 / (math.log2(i + 2))
+        for j in range(len(recommended_list)):
+            if recommended_list[j] in hit_set:
+                sum += j / (math.log2(j + 2))
         precision2 = Z * sum
-        NDCG_precision_list.append(precision2)
-    HR_precision = np.mean(HR_precision_list)
-    NDCG_precision = np.mean(NDCG_precision_list)
+        NDCG += precision2
+        print(' {:.2f} {:.2f}'.format(precision1, precision2))
+    print('\n')
+    HR_precision = HR / len(user_list)
+    NDCG_precision = NDCG / len(user_list)
     return HR_precision, NDCG_precision
 
 
@@ -493,11 +497,11 @@ def train(args, data, show_loss):
     adj_adam = data[4]
     user2item = data[5]
     train_data, test_data = data[6], data[7]
-    model = TSCN(args, n_users=n_user, n_items=n_item, adj_item=adj_item, adj_adam=adj_adam, user2item_dict=user2item)
+    model = TSCN(args, n_items=n_item, adj_item=adj_item, adj_adam=adj_adam, user2item_dict=user2item)
     # 2019/12/21 14:50 :现在按照要求重新处理原始数据
     # topK evaluation settings 论文中貌似没有 忽略
     
-    user_list, train_record, test_record, item_set = topn_settings(train_data, test_data, n_item)
+    user_list, train_record, test_record = topn_settings(train_data, test_data)
 
     # 训练过程
     with tf.Session() as sess:
@@ -505,21 +509,43 @@ def train(args, data, show_loss):
         
         for step in range(args.n_epochs):
             # training
+            print('epoch {} '.format(step))
             np.random.shuffle(train_data)
             start = 0
             while start + args.batch_size <= train_data.shape[0]:
                 _, loss = model.train(sess, get_feed_dict(model, train_data, start, start + args.batch_size))
                 start += args.batch_size
                 if show_loss:
-                    print(start, loss)
+                    print('epoch {}: {}/{} loss={:.5f}'.format(step + 1, start, train_data.shape[0], loss))
+                    # print(start, loss)
             # evalution method should be added. (2020/01/10 20:30)
             # HR evaluation step
             # def topn_eval(sess, model, user_list, train_record, test_record, item_set, n, batch_size):
-            HR_precision, NDCG_precision = topn_eval(sess, model, user_list, train_record, test_record, item_set, 10, args.batch_size)
-            print('epoch {} '.format(step))
-            print('HR precision: {:.4f} '.format(HR_precision), end='')
-            print('NDCG precision: {:.4f}'.format(NDCG_precision))
+
+        HR_precision, NDCG_precision = topn_eval(sess, model, user_list, train_record,
+                                                 test_record, set(items), 10, args.batch_size)
+        print('HR precision: {:.4f} '.format(HR_precision), end='')
+        print('NDCG precision: {:.4f}'.format(NDCG_precision))
 
 
-data = load_data()
+# 超参数设置
+parser = argparse.ArgumentParser()
+
+parser.add_argument('--dataset', type=str, default='kaggle', help='set aside')
+parser.add_argument('--pooling', type=str, default='adamic', help='which pooling method to use')
+parser.add_argument('--n_epochs', type=int, default=10, help=' the number of epochs')
+parser.add_argument('--sample_size', type=int, default=3, help='the number of child node of every node')
+parser.add_argument('--dim', type=int, default=32, help='number of embedding vector, choose in [8, 16, 32]')
+parser.add_argument('--k', type=int, default=3, help='the depth of tree')
+parser.add_argument('--batch_size', type=int, default=128, help='batch size')
+parser.add_argument('--l2_weight', type=float, default=1e-3, help='weight of l2 regularization in 1e-6~1')
+parser.add_argument('--lr', type=float, default=1.5e-4, help='learning rate')
+
+args = parser.parse_args()
+
+# 训练
+path = 'data/'
+data = load_data(path)
 train(args, data=data, show_loss=True)
+
+# 2020/2/3 evaluation is wrong
