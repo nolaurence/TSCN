@@ -24,16 +24,16 @@ args = parser.parse_args()
 
 # TSCN(args, n_users, n_items, adj_item, adj_adam, user2item_dict)
 def load_data():
-    user2item = np.load('newdata/newuser2item.npy', allow_pickle=True).item()
+    user2item = np.load('newdata/user2item.npy', allow_pickle=True).item()
     users = set(user2item.keys())
     items = list(np.load('newdata/items.npy', allow_pickle=True))
     n_item = len(items)
     items = list(range(len(items)))
     n_user = len(users)
-    
+
     adj_item = np.load('newdata/adj_item.npy', allow_pickle=True)
     adj_adam = np.load('newdata/adj_adam.npy', allow_pickle=True)
-    user2item = np.load('newdata/user2item.npy', allow_pickle=True).item()
+    # user2item = np.load('newdata/user2item.npy', allow_pickle=True).item()
     train_data = np.load('newdata/traindata.npy', allow_pickle=True)
     test_data = np.load('newdata/testdata.npy', allow_pickle=True)
     return n_user, n_item, items, adj_item, adj_adam, user2item, train_data, test_data
@@ -523,5 +523,3 @@ def train(args, data, show_loss):
 
 data = load_data()
 train(args, data=data, show_loss=True)
-
-# create a change

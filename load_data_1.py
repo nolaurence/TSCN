@@ -276,17 +276,17 @@ np.save('newdata/adj_adam.npy', adj_adam)
 # user2item = np.load('newdata/user2item.npy', allow_pickle=True).item()
 # items = np.load('newdata/items.npy', allow_pickle=True)
 
-user2item = index_userid(user2item)
-np.save('newdata/newuser2item.npy', user2item)
-
-uigraph = generate_negative_sample(user2item=user2item, items=items, sample_size=4)
-np.save('newdata/uigraph.npy', uigraph)
-train_data, test_data = dataset_split(uigraph=uigraph, test_ratio=0.3)
-np.save('newdata/traindata.npy', train_data)
-np.save('newdata/testdata.npy', test_data)
-
-# index操作应该在split之后，construct adjacency matrix之前
-
-# 注意：与论文不同：原文：9128 users，59,406 items，178,372 interactions
-# 实际：261,417 interactions, 68,433 items
+# user2item = index_userid(user2item)
+# np.save('newdata/newuser2item.npy', user2item)
+#
+# uigraph = generate_negative_sample(user2item=user2item, items=items, sample_size=4)
+# np.save('newdata/uigraph.npy', uigraph)
+# train_data, test_data = dataset_split(uigraph=uigraph, test_ratio=0.3)
+# np.save('newdata/traindata.npy', train_data)
+# np.save('newdata/testdata.npy', test_data)
+#
+# # index操作应该在split之后，construct adjacency matrix之前
+#
+# # 注意：与论文不同：原文：9128 users，59,406 items，178,372 interactions
+# # 实际：261,417 interactions, 68,433 items
 # print(uigraph_no_negative.shape)
