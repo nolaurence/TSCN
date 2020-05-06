@@ -45,6 +45,22 @@ def train(args, data, show_loss):
         print('NDCG precision: {:.4f}'.format(NDCG_precision))
 
 
+def load_data(path):
+    user2item = np.load(path + 'user2item.npy', allow_pickle=True).item()
+    # users = set(user2item.keys())
+    items = list(np.load(path + 'items.npy', allow_pickle=True))
+    n_item = len(items)
+    items = list(range(len(items)))
+    # n_user = len(users)
+
+    adj_item = np.load(path + 'adj_item.npy', allow_pickle=True)
+    adj_adam = np.load(path + 'adj_adam.npy', allow_pickle=True)
+    # user2item = np.load('newdata/user2item.npy', allow_pickle=True).item()
+    train_data = np.load(path + 'train_data.npy', allow_pickle=True)
+    test_data = np.load(path + 'test_data.npy', allow_pickle=True)
+    return n_item, items, adj_item, adj_adam, user2item, train_data, test_data
+
+
 def get_feed_dict(model, data, start, end):
     feed_dict = {model.user_indices: data[start:end, 0],
                  model.item_indices: data[start:end, 1],

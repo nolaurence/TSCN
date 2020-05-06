@@ -1,24 +1,11 @@
 import numpy as np
 import tensorflow as tf
-import argparse
+
 import math
 from abc import abstractmethod
 np.random.seed(1)
 
-def load_data(path):
-    user2item = np.load(path + 'user2item.npy', allow_pickle=True).item()
-    # users = set(user2item.keys())
-    items = list(np.load(path + 'items.npy', allow_pickle=True))
-    n_item = len(items)
-    items = list(range(len(items)))
-    # n_user = len(users)
 
-    adj_item = np.load(path + 'adj_item.npy', allow_pickle=True)
-    adj_adam = np.load(path + 'adj_adam.npy', allow_pickle=True)
-    # user2item = np.load('newdata/user2item.npy', allow_pickle=True).item()
-    train_data = np.load(path + 'train_data.npy', allow_pickle=True)
-    test_data = np.load(path + 'test_data.npy', allow_pickle=True)
-    return n_item, items, adj_item, adj_adam, user2item, train_data, test_data
 
 LAYER_IDS = {}
 
@@ -366,22 +353,9 @@ class TSCN(object):
 
 
 
-# 超参数设置
-parser = argparse.ArgumentParser()
 
-parser.add_argument('--dataset', type=str, default='kaggle', help='set aside')
-parser.add_argument('--pooling', type=str, default='adamic', help='which pooling method to use')
-parser.add_argument('--n_epochs', type=int, default=10, help=' the number of epochs')
-parser.add_argument('--sample_size', type=int, default=3, help='the number of child node of every node')
-parser.add_argument('--dim', type=int, default=32, help='number of embedding vector, choose in [8, 16, 32]')
-parser.add_argument('--k', type=int, default=3, help='the depth of tree')
-parser.add_argument('--batch_size', type=int, default=128, help='batch size')
-parser.add_argument('--l2_weight', type=float, default=1e-3, help='weight of l2 regularization in 1e-6~1')
-parser.add_argument('--lr', type=float, default=1.5e-4, help='learning rate')
 
-args = parser.parse_args()
+
 
 # 训练
-path = 'data/'
-data = load_data(path)
-train(args, data=data, show_loss=True)
+
