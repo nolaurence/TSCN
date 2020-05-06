@@ -5,8 +5,6 @@ import math
 from abc import abstractmethod
 np.random.seed(1)
 
-
-
 LAYER_IDS = {}
 
 def get_layer_id(layer_name=''):

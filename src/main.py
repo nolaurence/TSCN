@@ -16,7 +16,7 @@ parser.add_argument('--lr', type=float, default=1.5e-4, help='learning rate')
 
 args = parser.parse_args()
 
-path = 'data/'
+path = '../data/'
 data = load_data(path)
 train(args, data=data, show_loss=True)
 
