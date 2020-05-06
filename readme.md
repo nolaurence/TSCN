@@ -9,7 +9,16 @@ chmod 600 ~/.kaggle/kaggle.json
 kaggle datasets download -d retailrocket/ecommerce-dataset
 
 ## Required packages:
+Python 3.7
 Tensorflow 1.14  
 Pandas 0.24.2  
 Numpy 1.16.2  
+
+## How to run:
+if you have downloaded raw data:  
+1. specify the raw data directory in preprocess.py  
+2. rm -r data
+3. cd src
+4. python preprocess.py
+5. python main.py
 
