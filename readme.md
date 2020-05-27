@@ -22,3 +22,6 @@ if you have downloaded raw data:
 4. python preprocess.py
 5. python main.py
 
+if you want to run with existing data:
+1.python main.py
+
