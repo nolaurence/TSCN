@@ -2,11 +2,14 @@ A tree based graph convolution network
 =========================
 
 ## Get the original dataset:
+### Retialrocket:
 mkdir -p ~/.kaggle  
 echo '{"username":"nolaurence","key":"581f65fa2f236667ac3989e5c525fbbb"}' > ~/.kaggle/kaggle.json  
 chmod 600 ~/.kaggle/kaggle.json  
 
 kaggle datasets download -d retailrocket/ecommerce-dataset
+### Movielens 1m:
+https://grouplens.org/datasets/movielens/1m/
 
 ## Required packages:
 Python 3.7
