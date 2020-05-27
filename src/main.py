@@ -52,11 +52,11 @@ def preprocess(args):
 # finally, comment train and uncomment test to run evaluation
 
 # preprocess
-preprocess(args)
+# preprocess(args)
 
 # train
 if args.dataset == 'retailrocket':
-    path = '../retialrocket/'
+    path = '../retailrocket/'
 elif args.dataset == 'movielens':
     path = '../movielens/'
 else:
@@ -65,4 +65,4 @@ data = load_data(path)
 # train(args, data=data, gpu=args.use_gpu)
 
 # evaluation
-# test(args)
+test(args)
