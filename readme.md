@@ -10,7 +10,7 @@ kaggle datasets download -d retailrocket/ecommerce-dataset
 
 ## Required packages:
 Python 3.7
-Tensorflow 1.14  
+Pytorch 1.2 or later
 Pandas 0.24.2  
 Numpy 1.16.2  
 

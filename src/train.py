@@ -1,52 +1,86 @@
 from model import TSCN
+import time
+import torch
+from torch.utils.tensorboard import SummaryWriter
+from torch.utils import data as Data
+from torch import optim, nn
 import numpy as np
-import tensorflow as tf
-import math
 np.random.seed(1)
+torch.manual_seed(7)
 
-
-def train(args, data, show_loss):
-    # load_data返回值：return 0n_item, 1items, 2adj_item, 3adj_adam, 4user2item, 5train_data, 6test_data
-    # n_user = data[0]
+def train(args, data, gpu):
     n_item = data[0]
     items = data[1]
-    adj_item = data[2]
-    adj_adam = data[3]
-    user2item = data[4]
+    n_user = data[2]
+    adj_item, adj_adam = data[3], data[4]
     train_data, test_data = data[5], data[6]
-    model = TSCN(args, n_items=n_item, adj_item=adj_item, adj_adam=adj_adam, user2item_dict=user2item)
-    # 2019/12/21 14:50 :现在按照要求重新处理原始数据
-    # topK evaluation settings 论文中貌似没有 忽略
+    user2item = data[7]
 
-    user_list, train_record, test_record = topn_settings(train_data, test_data)
+    # detect devices
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-    # 训练过程
-    with tf.Session() as sess:
-        sess.run(tf.global_variables_initializer())
+    # tensorboard initialization
+    writer = SummaryWriter('../runs')
 
-        for step in range(args.n_epochs):
-            # training
-            print('epoch {} '.format(step))
-            np.random.shuffle(train_data)
-            start = 0
-            while start + args.batch_size <= train_data.shape[0]:
-                _, loss = model.train(sess, get_feed_dict(model, train_data, start, start + args.batch_size))
-                start += args.batch_size
-                if show_loss:
-                    print('epoch {}: {}/{} loss={:.5f}'.format(step + 1, start, train_data.shape[0], loss))
-                    # print(start, loss)
-            # evalution method should be added. (2020/01/10 20:30)
-            # HR evaluation step
-            # def topn_eval(sess, model, user_list, train_record, test_record, item_set, n, batch_size):
+    # load data
+    train_loader = Data.DataLoader(train_data, args.batch_size, True)
+    test_loader = Data.DataLoader(test_data, args.batch_size, True)
 
-        HR_precision, NDCG_precision = topn_eval(sess, model, user_list, train_record,
-                                                 test_record, set(items), 10, args.batch_size)
-        print('HR precision: {:.4f} '.format(HR_precision), end='')
-        print('NDCG precision: {:.4f}'.format(NDCG_precision))
+    model = TSCN(args, n_item, n_user, adj_item, adj_adam, user2item)
+    if gpu:
+        model.to(device)
+    else:
+        model.to('cpu')
+
+    # summary(model, input_size=(args.batch_size, 2))
+
+    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.l2_weight)
+    loss_fn = nn.CrossEntropyLoss()  # 不带softmax激活函数的CrossEntropy函数
+
+    # train
+    print('training ...')
+    idx = 0
+    for epoch in range(args.n_epochs):
+
+        running_loss = 0
+        n_batch = 0
+        for i, data in enumerate(train_loader):
+            idx += 1
+            optimizer.zero_grad()
+            inputs, labels = data
+
+            # if epoch == 0 and i == 0:
+            #     if torch.cuda.is_available() and gpu:
+            #         writer.add_graph(model, input_to_model=inputs.cuda(), verbose=False)
+            #     else:
+            #         writer.add_graph(model, input_to_model=inputs, verbose=False)
+            if inputs.shape[0] < args.batch_size:
+                continue
+            if torch.cuda.is_available() and gpu:
+                outputs = model(inputs.cuda())
+                loss = loss_fn(outputs, labels.cuda().long())
+            else:
+                outputs = model(inputs)
+                loss = loss_fn(outputs, labels.long())
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item()
+            n_batch += 1
+
+            # loss visualization
+            # writer.add_scalar('loss', loss.item(), global_step=idx)
+            print('\r', 'epoch {} batch {} loss: {:.4f}'.format(epoch + 1, i, loss.item()), end='')
+        writer.add_scalar('epoch loss', running_loss / n_batch, global_step=epoch + 1)
+        print('\nepocn {} loss:{:.4f}'.format(epoch + 1, running_loss / n_batch))
+
+    torch.save(model, '../weights/TSCN_' + args.dataset + '.pth')
 
 
 def load_data(path):
+    print('loading data ...')
     user2item = np.load(path + 'user2item.npy', allow_pickle=True).item()
+    n_user = len(user2item)
     # users = set(user2item.keys())
     items = list(np.load(path + 'items.npy', allow_pickle=True))
     n_item = len(items)
@@ -56,96 +90,46 @@ def load_data(path):
     adj_item = np.load(path + 'adj_item.npy', allow_pickle=True)
     adj_adam = np.load(path + 'adj_adam.npy', allow_pickle=True)
     # user2item = np.load('newdata/user2item.npy', allow_pickle=True).item()
+    train_data = train_set(path)
+    test_data = test_set(path)
+    return n_item, items, n_user, adj_item, adj_adam, train_data, test_data, user2item
+
+
+def load_train(path):
     train_data = np.load(path + 'train_data.npy', allow_pickle=True)
+    train_x = train_data[:,0:2]
+    train_y = train_data[:, 2]
+    return train_x, train_y
+
+
+class train_set(Data.Dataset):
+    def __init__(self, path, loader=load_train):
+        self.x, self.y = loader(path)
+
+    def __getitem__(self, item):
+        data = self.x[item]
+        label = self.y[item]
+        return data, label
+
+    def __len__(self):
+        return self.x.shape[0]
+
+
+def load_test(path):
     test_data = np.load(path + 'test_data.npy', allow_pickle=True)
-    return n_item, items, adj_item, adj_adam, user2item, train_data, test_data
+    test_x = test_data[:, 0:2]
+    test_y = test_data[:, 2]
+    return test_x, test_y
 
 
-def get_feed_dict(model, data, start, end):
-    feed_dict = {model.user_indices: data[start:end, 0],
-                 model.item_indices: data[start:end, 1],
-                 model.labels: data[start:end, 2]}
-    return feed_dict
+class test_set(Data.Dataset):
+    def __init__(self, path, loader=load_test):
+        self.x, self.y = loader(path)
 
+    def __getitem__(self, item):
+        data = self.x[item]
+        label = self.y[item]
+        return data, label
 
-def get_user_record(data, is_train):
-    user_dict = dict()
-    for idx in range(data.shape[0]):
-        user = data[idx][0]
-        item = data[idx][1]
-        label = data[idx][2]
-        if is_train or label == 1:
-            if user not in user_dict:
-                user_dict[user] = set()
-            user_dict[user].add(item)
-    return user_dict
-
-
-def topn_settings(train_data, test_data):
-    train_record = get_user_record(train_data, True)
-    test_record = get_user_record(test_data, False)
-    user_list = list(set(train_record.keys()) & set(test_record.keys()))
-    return user_list, train_record, test_record
-
-
-def topn_eval(sess, model, user_list, train_record, test_record, item_set, n, batch_size):
-    # HR_precision_list = list()
-    # NDCG_precision_list = list()
-
-    Z = 0
-    for s in range(n):
-        Z += 1 / (math.log2(s + 2))
-    Z = 1 / Z
-
-    print('operating on top n evaluating ...')
-    print('n_user: {}'.format(len(user_list)))
-    idx = 0
-    HR = 0
-    NDCG = 0
-    for user in user_list:
-        idx += 1
-        print('\r', '{}/{}'.format(idx, len(user_list)), end='')
-        # print('\r', i, end='')
-        test_item_list = list(item_set - train_record[user])
-        item_score_map = dict()
-        start = 0
-        while start + batch_size <= len(test_item_list):
-            items, scores = model.get_scores(sess, {model.user_indices: [user] * batch_size,
-                                                    model.item_indices: test_item_list[start:start + batch_size]})
-            for item, score in zip(items, scores):
-                item_score_map[item] = score
-            start += batch_size
-
-        # padding the last incomplete minibatch if exists
-        if start < len(test_item_list):
-            items, scores = model.get_scores(sess, {model.user_indices: [user] * batch_size,
-                                                    model.item_indices: test_item_list[start:] + [
-                                                        test_item_list[-1]] * (batch_size - len(
-                                                        test_item_list) + start)})
-            for item, score in zip(items, scores):
-                item_score_map[item] = score
-
-        item_score_pair_sorted = sorted(item_score_map.items(), key=lambda x: x[1], reverse=True)
-        item_sorted = [i[0] for i in item_score_pair_sorted]
-        # print(item_sorted[:n])
-        # print(test_record[user])
-
-        hit_num = len(set(item_sorted[:n]) & test_record[user])
-        # HR result
-        precision1 = hit_num / n
-        HR += precision1
-
-        # NDCG result
-        sum = 0
-        recommended_list = list(item_sorted[:n])
-        hit_set = set(item_sorted[:n]) & test_record[user]
-        for j in range(len(recommended_list)):
-            if recommended_list[j] in hit_set:
-                sum += j / (math.log2(j + 2))
-        precision2 = Z * sum
-        NDCG += precision2
-        print(' {:.2f} {:.2f}'.format(precision1, precision2))
-    print('\n')
-    HR_precision = HR / len(user_list)
-    NDCG_precision = NDCG / len(user_list)
-    return HR_precision, NDCG_precision
+    def __len__(self):
+        return self.x.shape[0]
