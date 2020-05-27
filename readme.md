@@ -1,5 +1,5 @@
-A tree based graph convolution network
-=========================
+#A tree based graph convolution network
+
 
 ## Get the original dataset:
 ### Retialrocket:
@@ -12,8 +12,8 @@ kaggle datasets download -d retailrocket/ecommerce-dataset
 https://grouplens.org/datasets/movielens/1m/
 
 ## Required packages:
-Python 3.7
-Pytorch 1.2 or later
+Python 3.7  
+Pytorch 1.2 or later  
 Pandas 0.24.2  
 Numpy 1.16.2  
 
