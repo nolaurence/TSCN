@@ -4,6 +4,7 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils import data as Data
 from torch import optim, nn
+from torchsummary import summary
 import numpy as np
 np.random.seed(1)
 torch.manual_seed(7)
@@ -32,7 +33,11 @@ def train(args, data, gpu):
     else:
         model.to('cpu')
 
-    # summary(model, input_size=(args.batch_size, 2))
+    # visualization of computation graph
+    input_to = torch.zeros((args.batch_size, 2), dtype=torch.int32)
+    if torch.cuda.is_available():
+        input_to = input_to.cuda()
+    writer.add_graph(model, input_to_model=input_to)
 
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.l2_weight)
     loss_fn = nn.CrossEntropyLoss()  # 不带softmax激活函数的CrossEntropy函数

@@ -32,7 +32,7 @@ class AdamicPooling(nn.Module):
         # normalized adamic values [batch_size, -1, n_sample, 1]
         adamvalues_normalized = F.softmax(neighbor_adams, dim=2).unsqueeze(dim=3)
         # [batch size, -1, dim]
-        neighbors_after_pooling = torch.mean(adamvalues_normalized * neighbor_vectors, dim=2)
+        neighbors_after_pooling = torch.sum(adamvalues_normalized * neighbor_vectors, dim=2)
 
         # [batch size, -1, dim * 2]
         output = torch.cat([self_vectors, neighbors_after_pooling], dim=2)
@@ -105,7 +105,7 @@ class MaxPooling(nn.Module):
         # neighbor vectors: [batch size, -1, n_sample, dim]
 
         # [batch size, -1, dim]
-        neighbors_after_pooling = torch.mean(neighbor_vectors, dim=2)
+        neighbors_after_pooling = torch.max(neighbor_vectors, dim=2)
         # [batch size, -1, dim * 2]
         output = torch.cat([self_vectors, neighbors_after_pooling], dim=2)
         # [-1, dim * 2]

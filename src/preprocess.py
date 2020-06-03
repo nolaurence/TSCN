@@ -13,7 +13,7 @@ def load_events(path):
     df.sort_values('timestamp', inplace=True)
 
     print(df.shape)
-    df = df.drop_duplicates(['visitorid', 'itemid'], keep='last')
+    # df = df.drop_duplicates(['visitorid', 'itemid'], keep='last')
     df = df.reset_index(drop=True)
     print(df.shape)
     user2item = dict()

@@ -36,7 +36,7 @@ def test(args):
 
 
 def preprocess(args):
-    if args.dataset == 'retialrocket':
+    if args.dataset == 'retailrocket':
         data_dir = '../retailrocket/'
         load_retailrocket(data_dir, args.sample_size)
     elif args.dataset == 'movielens':
@@ -52,7 +52,7 @@ def preprocess(args):
 # finally, comment train and uncomment test to run evaluation
 
 # preprocess
-# preprocess(args)
+preprocess(args)
 
 # train
 if args.dataset == 'retailrocket':
@@ -62,7 +62,7 @@ elif args.dataset == 'movielens':
 else:
     raise Exception('Unknown dataset: ' + args.dataset)
 data = load_data(path)
-# train(args, data=data, gpu=args.use_gpu)
+train(args, data=data, gpu=args.use_gpu)
 
 # evaluation
-test(args)
+# test(args)
