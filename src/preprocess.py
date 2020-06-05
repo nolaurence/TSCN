@@ -13,7 +13,7 @@ def load_events(path):
     df.sort_values('timestamp', inplace=True)
 
     print(df.shape)
-    # df = df.drop_duplicates(['visitorid', 'itemid'], keep='last')
+    df = df.drop_duplicates(['visitorid', 'itemid'], keep='last')
     df = df.reset_index(drop=True)
     print(df.shape)
     user2item = dict()
@@ -117,7 +117,7 @@ def id_index(dataset, itemset):
     return user_index, item_index, n_item
 
 
-def generate_negatives(itemset, trainset, testset, user_index, item_index, is_movielens):
+def generate_negatives(itemset, trainset, testset, user_index, item_index, dataset):
     print('generating negative smaples ...')
     trainrecord = list()
     testrecord = list()
@@ -126,12 +126,13 @@ def generate_negatives(itemset, trainset, testset, user_index, item_index, is_mo
         print('\r', '{}/{}'.format(x, len(trainset)), end='')
         x += 1
         record = trainset[user]
+        pos = dataset[user][:, 0]
         for item in record:
             trainrecord.append([user_index[user], item_index[item], 1])
 
         # for each event, we random sample 4 negative samples
-        chosen = np.random.choice(list(itemset - record), size= len(record) * 4, replace=is_movielens)
-        for item in set(chosen):
+        chosen = np.random.choice(list(itemset - set(pos)), size=len(record) * 4, replace=False)
+        for item in chosen:
             trainrecord.append([user_index[user], item_index[item], 0])
     print()
     x = 0
@@ -139,9 +140,10 @@ def generate_negatives(itemset, trainset, testset, user_index, item_index, is_mo
         print('\r', '{}/{}'.format(x, len(testset)), end='')
         x += 1
         record1 = testset[user]
+        pos = dataset[user][:, 0]
         testrecord.append([user_index[user], item_index[record1], 1])
         # for each user, we random sample 99 negative samples
-        sample = np.random.choice(list(itemset - set([record1])), size=99, replace=False)
+        sample = np.random.choice(list(itemset - set(pos)), size=99, replace=False)
         for item in sample:
             testrecord.append([user_index[user], item_index[item], 0])
     print()
@@ -152,7 +154,7 @@ def generate_negatives(itemset, trainset, testset, user_index, item_index, is_mo
 
 
 # return n_item, items, adj_item, adj_adam, user2item, train_data, test_data
-def build_itemgraph(train_record, path, n_sample):
+def build_itemgraph(train_record, test_record, path, n_sample):
     user2item = dict()
     item2user = dict()
     # build index
@@ -171,7 +173,24 @@ def build_itemgraph(train_record, path, n_sample):
                 item2user[item] = set()
             item2user[item].add(user)
     print()
+
+
+    for i in range(test_record.shape[0]):
+        if i % 1000 == 0:
+            print('\r', '{}/{}'.format(i, test_record.shape[0]), end='')
+        user = test_record[i, 0]
+        item = test_record[i, 1]
+        label = test_record[i, 2]
+        if label == 1:
+            if user not in user2item:
+                user2item[user] = set()
+            user2item[user].add(item)
+            if item not in item2user:
+                item2user[item] = set()
+            item2user[item].add(user)
+    print()
     np.save(path + 'user2item.npy', user2item)
+    # np.save(path + 'user2item.npy', user2item)
     # np.save(path + 'item2user.npy', item2user)
     # construct item graph index
     print('build index of item graph ...')
@@ -221,7 +240,7 @@ def build_itemgraph(train_record, path, n_sample):
             temp_graph[item1] = []
         temp_graph[item1].append((item2, adam))
 
-    print('\n operating on subgraph regularization ...')
+    print('\noperating on subgraph regularization ...')
     dtype = [('id', 'int'), ('adamvalue', 'float')]
     i = 0
     for item in temp_graph.keys():
@@ -270,12 +289,12 @@ def load_retailrocket(path, n_sample):
     user_index, item_index, n_item = id_index(dataset, itemset)
     items = list(range(n_item))
     np.save(path + 'items.npy', items)
-    trainrecord, testrecord = generate_negatives(itemset, trainset, testset, user_index, item_index, False)
+    trainrecord, testrecord = generate_negatives(itemset, trainset, testset, user_index, item_index, dataset)
     print(trainrecord.shape)
     np.save(path + 'train_data.npy', trainrecord)
     np.save(path + 'test_data.npy', testrecord)
 
-    itemgraph = build_itemgraph(trainrecord, path, n_sample)
+    itemgraph = build_itemgraph(trainrecord, testrecord, path, n_sample)
     # np.save(path + 'itemgraph.npy', itemgraph)
     adj_item, adj_adam = construct_adj(itemgraph, itemset, n_sample)
     np.save(path + 'adj_item.npy', adj_item)
@@ -290,12 +309,12 @@ def load_movielens(path, n_sample):
     user_index, item_index, n_item = id_index(dataset, itemset)
     items = list(range(n_item))
     np.save(path + 'items.npy', items)
-    trainrecord, testrecord = generate_negatives(itemset, trainset, testset, user_index, item_index, True)
+    trainrecord, testrecord = generate_negatives(itemset, trainset, testset, user_index, item_index, dataset)
     print(trainrecord.shape)
     np.save(path + 'train_data.npy', trainrecord)
     np.save(path + 'test_data.npy', testrecord)
 
-    itemgraph = build_itemgraph(trainrecord, path, n_sample)
+    itemgraph = build_itemgraph(trainrecord, testrecord, path, n_sample)
     # np.save(path + 'itemgraph.npy', itemgraph)
     adj_item, adj_adam = construct_adj(itemgraph, itemset, n_sample)
     np.save(path + 'adj_item.npy', adj_item)

@@ -65,4 +65,4 @@ data = load_data(path)
 train(args, data=data, gpu=args.use_gpu)
 
 # evaluation
-# test(args)
+test(args)
