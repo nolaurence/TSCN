@@ -1,10 +1,12 @@
-from model import TSCN
-import time
 import torch
+import logging
+import os
+from time import time
 from torch.utils.tensorboard import SummaryWriter
-from torch.utils import data as Data
 from torch import optim, nn
-from torchsummary import summary
+from eval import evaluation
+from model import TSCN
+from preprocess import prepare_batch_input
 import numpy as np
 np.random.seed(1)
 torch.manual_seed(7)
@@ -16,69 +18,97 @@ def train(args, data, gpu):
     adj_item, adj_adam = data[3], data[4]
     train_data, test_data = data[5], data[6]
     user2item = data[7]
+    # item_embedding_matrix = data[8]
+    print(args)
 
     # detect devices
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
     # tensorboard initialization
-    writer = SummaryWriter('../runs')
+    tb_dir = '../runs'
+    if not os.path.exists(tb_dir):
+        os.makedirs(tb_dir)
+    writer = SummaryWriter(tb_dir)
 
-    # load data
-    train_loader = Data.DataLoader(train_data, args.batch_size, True)
-    test_loader = Data.DataLoader(test_data, args.batch_size, True)
+    weights_dir = '../weights'
+    if not os.path.exists(weights_dir):
+        os.makedirs(weights_dir)
 
-    model = TSCN(args, n_item, n_user, adj_item, adj_adam, user2item)
+    # log
+    log_dir = os.path.join('../log', args.dataset)
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    log_file = os.path.join(log_dir, 'TSCN.log')
+    if logging.root.handlers:
+        logging.root.handlers = []
+    logging.basicConfig(format='%(asctime)s : %(levelname)s: %(message)s',
+                        level=logging.INFO,
+                        filename=log_file)
+
+    model = TSCN(args, n_item, n_user, adj_item, adj_adam)
     if gpu:
         model.to(device)
     else:
         model.to('cpu')
 
     # visualization of computation graph
-    input_to = torch.zeros((args.batch_size, 2), dtype=torch.int32)
-    if torch.cuda.is_available():
-        input_to = input_to.cuda()
-    writer.add_graph(model, input_to_model=input_to)
+    # input_to = torch.zeros((args.batch_size, args.dim + 1), dtype=torch.float32)
+    # if torch.cuda.is_available():
+    #     input_to = input_to.cuda()
+    # writer.add_graph(model, input_to_model=input_to)
 
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.l2_weight)
-    loss_fn = nn.CrossEntropyLoss()  # 不带softmax激活函数的CrossEntropy函数
+    loss_fn = nn.BCELoss()  # 不带softmax激活函数的CrossEntropy函数
 
     # train
     print('training ...')
     idx = 0
+    # for epoch in range(args.n_epochs):
     for epoch in range(args.n_epochs):
-
         running_loss = 0
-        n_batch = 0
-        for i, data in enumerate(train_loader):
-            idx += 1
+        start_time = time()
+        for i in range(len(train_data)):
             optimizer.zero_grad()
-            inputs, labels = data
 
-            # if epoch == 0 and i == 0:
-            #     if torch.cuda.is_available() and gpu:
-            #         writer.add_graph(model, input_to_model=inputs.cuda(), verbose=False)
-            #     else:
-            #         writer.add_graph(model, input_to_model=inputs, verbose=False)
-            if inputs.shape[0] < args.batch_size:
-                continue
+            data = train_data[i]
+            data = np.array(data)
+            np.random.shuffle(data)
+            user_list = data[:, 0]
+            item_list = data[:, 1]
+            labels = torch.from_numpy(data[:, 2])
+            # prepare user input
+            user_input, n_idxs = prepare_batch_input(user_list, item_list, user2item, n_item)
+
             if torch.cuda.is_available() and gpu:
-                outputs = model(inputs.cuda())
-                loss = loss_fn(outputs, labels.cuda().long())
+                user_input = torch.from_numpy(np.array(user_input)).cuda()
+                item_input = torch.from_numpy(np.array(item_list)).cuda()
+                n_idx_input = torch.from_numpy(np.array(n_idxs)).cuda()
+
+                outputs = model(user_input, item_input, n_idx_input)
+                loss = loss_fn(outputs, labels.cuda().float())
             else:
-                outputs = model(inputs)
-                loss = loss_fn(outputs, labels.long())
+                user_input = torch.from_numpy(np.array(user_input))
+                item_input = torch.from_numpy(np.array(item_list))
+                n_idx_input = torch.from_numpy(np.array(n_idxs))
+
+                outputs = model(user_input, item_input, n_idx_input)
+                loss = loss_fn(outputs, labels.float())
             loss.backward()
             optimizer.step()
 
             running_loss += loss.item()
-            n_batch += 1
-
-            # loss visualization
-            # writer.add_scalar('loss', loss.item(), global_step=idx)
-            print('\r', 'epoch {} batch {} loss: {:.4f}'.format(epoch + 1, i, loss.item()), end='')
-        writer.add_scalar('epoch loss', running_loss / n_batch, global_step=epoch + 1)
-        print('\nepocn {} loss:{:.4f}'.format(epoch + 1, running_loss / n_batch))
-
+            print('epoch {}: {}/{} loss = {:.4f}'.format(epoch + 1, i, n_user, loss.item()))
+        end_time = time()
+        # evaluation
+        hr, ndcg = evaluation(model, test_data, user2item, args, n_item)
+        eval_time = time()
+        writer.add_scalar('epoch loss', running_loss / n_user, global_step=epoch + 1)
+        writer.add_scalar('hit ratio@10', hr, global_step=epoch + 1)
+        writer.add_scalar('NDCG @ 10', ndcg, global_step=epoch + 1)
+        print('epocn {} loss:{:.4f}, train_time = [%.1f s], eval_time = [%.1f s]'.format(epoch + 1, running_loss / n_user,
+                                                                                         end_time - start_time, eval_time - end_time))
+        logging.info('epocn {} loss:{:.4f}, train_time = [%.1f s], eval_time = [%.1f s]'.format(epoch + 1, running_loss / n_user,
+                                                                                                end_time - start_time, eval_time - end_time))
     torch.save(model, '../weights/TSCN_' + args.dataset + '.pth')
 
 
@@ -89,52 +119,13 @@ def load_data(path):
     # users = set(user2item.keys())
     items = list(np.load(path + 'items.npy', allow_pickle=True))
     n_item = len(items)
-    items = list(range(len(items)))
+    # items = list(range(len(items)))
     # n_user = len(users)
 
     adj_item = np.load(path + 'adj_item.npy', allow_pickle=True)
     adj_adam = np.load(path + 'adj_adam.npy', allow_pickle=True)
     # user2item = np.load('newdata/user2item.npy', allow_pickle=True).item()
-    train_data = train_set(path)
-    test_data = test_set(path)
+    train_data = list(np.load(path + 'train_data.npy', allow_pickle=True))
+    test_data = list(np.load(path + 'test_data.npy', allow_pickle=True))
+    # item_emb = np.load(path + 'item_emb.npy', allow_pickle=True)
     return n_item, items, n_user, adj_item, adj_adam, train_data, test_data, user2item
-
-
-def load_train(path):
-    train_data = np.load(path + 'train_data.npy', allow_pickle=True)
-    train_x = train_data[:,0:2]
-    train_y = train_data[:, 2]
-    return train_x, train_y
-
-
-class train_set(Data.Dataset):
-    def __init__(self, path, loader=load_train):
-        self.x, self.y = loader(path)
-
-    def __getitem__(self, item):
-        data = self.x[item]
-        label = self.y[item]
-        return data, label
-
-    def __len__(self):
-        return self.x.shape[0]
-
-
-def load_test(path):
-    test_data = np.load(path + 'test_data.npy', allow_pickle=True)
-    test_x = test_data[:, 0:2]
-    test_y = test_data[:, 2]
-    return test_x, test_y
-
-
-class test_set(Data.Dataset):
-    def __init__(self, path, loader=load_test):
-        self.x, self.y = loader(path)
-
-    def __getitem__(self, item):
-        data = self.x[item]
-        label = self.y[item]
-        return data, label
-
-    def __len__(self):
-        return self.x.shape[0]

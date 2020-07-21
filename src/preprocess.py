@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
+import torch
 np.random.seed(1)
+torch.manual_seed(7)
 
 def load_events(path):
     print('loading retailrocket dataset ...')
@@ -114,84 +116,105 @@ def id_index(dataset, itemset):
         user_index[userset[i]] = i
     for i in range(n_item):
         item_index[itemset[i]] = i
-    return user_index, item_index, n_item
+    return user_index, item_index, n_user, n_item
 
 
 def generate_negatives(itemset, trainset, testset, user_index, item_index, dataset):
     print('generating negative smaples ...')
-    trainrecord = list()
-    testrecord = list()
+    # get positive record
+    print('gathering train record ...')
+    n_item = len(itemset)
     x = 0
+    train_hist = {}
     for user in trainset.keys():
+        x += 1
         print('\r', '{}/{}'.format(x, len(trainset)), end='')
-        x += 1
-        record = trainset[user]
-        pos = dataset[user][:, 0]
-        for item in record:
-            trainrecord.append([user_index[user], item_index[item], 1])
 
-        # for each event, we random sample 4 negative samples
-        chosen = np.random.choice(list(itemset - set(pos)), size=len(record) * 4, replace=False)
-        for item in chosen:
-            trainrecord.append([user_index[user], item_index[item], 0])
+        item_hist = trainset[user]
+        train_hist[user_index[user]] = []
+        for item_old in item_hist:
+            train_hist[user_index[user]].append(item_index[item_old])
     print()
+
+    trainrecord, testrecord = [], []
+    print('generating train set negatives ...')
     x = 0
-    for user in testset.keys():
-        print('\r', '{}/{}'.format(x, len(testset)), end='')
+    for user in train_hist.keys():
+        data = []
         x += 1
+        print('\r', '{}/{}'.format(x, len(train_hist)), end='')
+        positive_items = train_hist[user]
+        negative_samples = np.random.choice(list(set(range(n_item)) - set(positive_items)),
+                                            size = 4 * len(positive_items), replace=True)
+        negative_samples = list(set(negative_samples))
+        for item in positive_items:
+            # [user, item, label]
+            data.append([user, item, 1])
+        for item in negative_samples:
+            # [user, item, label]
+            data.append([user, item, 0])
+        trainrecord.append(data)
+        del data
+    print()
+
+    x = 0
+    print('generating test set negatives ...')
+    for user in testset.keys():
+        x += 1
+        print('\r', '{}/{}'.format(x, len(testset)), end='')
+
+        data = []
         record1 = testset[user]
         pos = dataset[user][:, 0]
-        testrecord.append([user_index[user], item_index[record1], 1])
+        # [user, item, label]
+        data.append([user_index[user], item_index[record1], 1])
         # for each user, we random sample 99 negative samples
         sample = np.random.choice(list(itemset - set(pos)), size=99, replace=False)
         for item in sample:
-            testrecord.append([user_index[user], item_index[item], 0])
+            # [user, item, label]
+            data.append([user_index[user], item_index[item], 0])
+        testrecord.append(data)
+        del data
     print()
-    trainrecord = np.array(trainrecord)
-    testrecord = np.array(testrecord)
 
-    return trainrecord, testrecord
+    return trainrecord, testrecord, train_hist
 
 
 # return n_item, items, adj_item, adj_adam, user2item, train_data, test_data
-def build_itemgraph(train_record, test_record, path, n_sample):
-    user2item = dict()
-    item2user = dict()
+def build_itemgraph(train_hist, test_record, path, n_sample):
+    user2item, item2user = {}, {}
     # build index
+    i = 0
     print('building index ...')
-    for i in range(train_record.shape[0]):
-        if i % 1000 == 0:
-            print('\r', '{}/{}'.format(i, train_record.shape[0]), end='')
-        user = train_record[i, 0]
-        item = train_record[i, 1]
-        label = train_record[i, 2]
-        if label == 1:
-            if user not in user2item:
-                user2item[user] = set()
-            user2item[user].add(item)
-            if item not in item2user:
+    for user in train_hist.keys():
+        print('\r', '{}/{}'.format(i, len(train_hist)), end='')
+        i += 1
+        record = train_hist[user]
+        user2item[user] = set(record)
+        for item in record:
+            if item not in item2user.keys():
                 item2user[item] = set()
             item2user[item].add(user)
     print()
 
-
-    for i in range(test_record.shape[0]):
-        if i % 1000 == 0:
-            print('\r', '{}/{}'.format(i, test_record.shape[0]), end='')
-        user = test_record[i, 0]
-        item = test_record[i, 1]
-        label = test_record[i, 2]
-        if label == 1:
-            if user not in user2item:
-                user2item[user] = set()
-            user2item[user].add(item)
-            if item not in item2user:
-                item2user[item] = set()
-            item2user[item].add(user)
-    print()
+    # getting information of test set
+    # for i in range(test_record.shape[0]):
+    #     if i % 1000 == 0:
+    #         print('\r', '{}/{}'.format(i, test_record.shape[0]), end='')
+    #     user = test_record[i, 0]
+    #     item = test_record[i, 1]
+    #     label = test_record[i, 2]
+    #     if label == 1:
+    #         if user not in user2item:
+    #             user2item[user] = set()
+    #         user2item[user].add(item)
+    #         if item not in item2user:
+    #             item2user[item] = set()
+    #         item2user[item].add(user)
+    # print()
     np.save(path + 'user2item.npy', user2item)
     # np.save(path + 'user2item.npy', user2item)
-    # np.save(path + 'item2user.npy', item2user)
+    np.save(path + 'item2user.npy', item2user)
     # construct item graph index
     print('build index of item graph ...')
     temp = list()
@@ -204,6 +227,8 @@ def build_itemgraph(train_record, test_record, path, n_sample):
             temp += user2item[user]
         temp = list(set(temp))
         for it in temp:
+            if item == it:
+                continue
             graph.append([item, it])
         temp.clear()
     graph = np.array(graph)
@@ -225,7 +250,7 @@ def build_itemgraph(train_record, test_record, path, n_sample):
             graph_with_value.append([graph[i][0], graph[i][1], adamic_value])
     graph_with_value = np.array(graph_with_value)
     print()
-    # np.save(path + 'graph_with_value.npy', graph_with_value)
+    np.save(path + 'graph_with_value.npy', graph_with_value)
     # construct item graph
     temp_graph = dict()
     itemgraph = dict()
@@ -240,6 +265,10 @@ def build_itemgraph(train_record, test_record, path, n_sample):
             temp_graph[item1] = []
         temp_graph[item1].append((item2, adam))
 
+    # del graph
+    # del graph_with_value
+    # np.save(path + 'graph_with_value.npy', temp_graph)
+
     print('\noperating on subgraph regularization ...')
     dtype = [('id', 'int'), ('adamvalue', 'float')]
     i = 0
@@ -253,7 +282,7 @@ def build_itemgraph(train_record, test_record, path, n_sample):
         else:
             itemgraph[item] = temp_graph[item]
     print()
-    return itemgraph
+    return itemgraph, user2item
 
 
 def construct_adj(graph, items, n_sample):
@@ -282,41 +311,117 @@ def construct_adj(graph, items, n_sample):
     return adj_item, adj_adam
 
 
-def load_retailrocket(path, n_sample):
-    user2item = load_events(path)
-    dataset, itemset = dataset_filter(user2item)
+# def item_embedding_matrix_init(args, n_item):
+#     item_emb_matrix = torch.FloatTensor(n_item, args.dim)
+#     torch.nn.init.xavier_uniform_(item_emb_matrix)
+#     item_emb_matrix = item_emb_matrix.numpy()
+#     return item_emb_matrix
+
+
+# deprecated
+def construct_user_embedding(user2item, data, item_embedding_matrix, is_test):
+    data_after_init = []
+    for i in range(data.shape[0]):
+        print('\r', '{:.2f} %'.format(i / data.shape[0] * 100), end='')
+        user = data[i, 0]
+        item = data[i, 1]
+        label = data[i, 2]
+        itemset = set(user2item[user])  # Ru+
+        nu_plus = len(itemset)
+        itemset.discard(item)
+        # nu+
+        user_profile = list(np.sum(item_embedding_matrix[list(itemset)], axis=0) / nu_plus)
+        if is_test:
+            user_profile = user_profile + [float(item), float(user), float(label)]
+        else:
+            user_profile = user_profile + [float(item), float(label)]
+        # user_profile.append(float(item))
+        # user_profile.append(float(label))
+        data_after_init.append(user_profile)
+    data_after_init = np.array(data_after_init, dtype=np.float32)
+    print()
+    return data_after_init
+
+
+def load_retailrocket(args, path, n_sample):
+    data = load_events(path)
+    dataset, itemset = dataset_filter(data)
     trainset, testset = data_split(dataset)
-    user_index, item_index, n_item = id_index(dataset, itemset)
+    user_index, item_index, n_user, n_item = id_index(dataset, itemset)
     items = list(range(n_item))
     np.save(path + 'items.npy', items)
-    trainrecord, testrecord = generate_negatives(itemset, trainset, testset, user_index, item_index, dataset)
-    print(trainrecord.shape)
+    trainrecord, testrecord, train_hist = generate_negatives(itemset, trainset, testset, user_index, item_index, dataset)
+    print(len(trainrecord))
     np.save(path + 'train_data.npy', trainrecord)
     np.save(path + 'test_data.npy', testrecord)
 
-    itemgraph = build_itemgraph(trainrecord, testrecord, path, n_sample)
+    itemgraph, user2item = build_itemgraph(train_hist, testrecord, path, n_sample)
     # np.save(path + 'itemgraph.npy', itemgraph)
     adj_item, adj_adam = construct_adj(itemgraph, itemset, n_sample)
     np.save(path + 'adj_item.npy', adj_item)
     np.save(path + 'adj_adam.npy', adj_adam)
 
+    # item_embedding_matrix = item_embedding_matrix_init(args, n_item)
+    # np.save(path + 'item_emb.npy', item_embedding_matrix)
+    # print('constructing user embeddings ...')
+    # train_data = construct_user_embedding(user2item, trainrecord, item_embedding_matrix, False)
+    # test_data = construct_user_embedding(user2item, testrecord, item_embedding_matrix, True)
+    # np.save(path + 'train_data.npy', train_data)
+    # np.save(path + 'test_data.npy', test_data)
 
-def load_movielens(path, n_sample):
+def load_movielens(args, path, n_sample):
     data = load_ml(path)
     dataset, itemset = dataset_filter(data)
     # np.save(path + 'dataset.npy', dataset)
     trainset, testset = data_split(dataset)
-    user_index, item_index, n_item = id_index(dataset, itemset)
+    user_index, item_index, n_user, n_item = id_index(dataset, itemset)
     items = list(range(n_item))
     np.save(path + 'items.npy', items)
-    trainrecord, testrecord = generate_negatives(itemset, trainset, testset, user_index, item_index, dataset)
-    print(trainrecord.shape)
+    trainrecord, testrecord, train_hist = generate_negatives(itemset, trainset, testset, user_index, item_index, dataset)
+    print(len(trainrecord))
     np.save(path + 'train_data.npy', trainrecord)
     np.save(path + 'test_data.npy', testrecord)
 
-    itemgraph = build_itemgraph(trainrecord, testrecord, path, n_sample)
+    itemgraph, user2item = build_itemgraph(train_hist, testrecord, path, n_sample)
     # np.save(path + 'itemgraph.npy', itemgraph)
     adj_item, adj_adam = construct_adj(itemgraph, itemset, n_sample)
     np.save(path + 'adj_item.npy', adj_item)
     np.save(path + 'adj_adam.npy', adj_adam)
 
+    # item_embedding_matrix = item_embedding_matrix_init(args, n_item)
+    # np.save(path + 'item_emb.npy', item_embedding_matrix)
+    # print('constructing user embeddings ...')
+    # train_data = construct_user_embedding(user2item, trainrecord, item_embedding_matrix, False)
+    # test_data = construct_user_embedding(user2item, testrecord, item_embedding_matrix, True)
+    # np.save(path + 'train_data.npy', train_data)
+    # np.save(path + 'test_data.npy', test_data)
+
+def prepare_batch_input(user_list, item_list, trainrecord, n_item):
+    user_input, n_idx_list = [], []
+    for i in range(len(item_list)):
+        user = user_list[i]
+        item = item_list[i]
+        positive_samples = list(trainrecord[user])
+        n_idx = remove_item(n_item, positive_samples, item)
+        n_idx_list.append(n_idx)
+        user_input.append(positive_samples)
+    user_input = add_mask(n_item, user_input, max(n_idx_list))
+    return user_input, n_idx_list
+
+
+def remove_item(feature_mask, users, item):
+    flag = 0
+    for i in range(len(users)):
+        if users[i] == item:
+            users[i] = users[-1]
+            users[-1] = feature_mask
+            flag = 1
+            break
+    return len(users) - flag
+
+
+def add_mask(feature_mask, features, num_max):
+    # uniformalize the length of each batch
+    for i in range(len(features)):
+        features[i] = features[i] + [feature_mask] * (num_max + 1 - len(features[i]))
+    return features

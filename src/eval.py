@@ -2,89 +2,76 @@ import torch
 import numpy as np
 import math
 import torch.nn.functional as F
-
-def get_user_record(data_loader):
-    print("getting user's record ...")
-    record = dict()
-    for _, data in enumerate(data_loader):
-        inputs, labels = data
-        users = inputs.numpy()[:, 0]
-        items = inputs.numpy()[:, 1]
-        for i in range(inputs.shape[0]):
-            if labels[i] == 1:
-                if int(users[i]) not in record.keys():
-                    record[int(users[i])] = set()
-                record[int(users[i])].add(int(items[i]))
-    return record
+from preprocess import prepare_batch_input
+np.random.seed(1)
 
 
-def evaluation(model, test_loader, user_record, args):
+def evaluation(model, test_data, user_record, args, n_item):
     # get predictions
+    test_record = get_test_record(test_data)
+    hit_ratio, ndcg = [], []
     print('working on evaluation ...')
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    model.to(device)
-    test_record = dict()
     with torch.no_grad():
-        for batch, data in enumerate(test_loader):
-            inputs = data[0]
-            length = inputs.shape[0]
-            if inputs.shape[0] < args.batch_size:
-                # padding the last batch
-                inputs = torch.cat((inputs, torch.zeros((args.batch_size - inputs.shape[0], 2), dtype=torch.int32)), 0)
-            print('\r', 'batch:', batch, end='')
-            if torch.cuda.is_available():
-                outputs = F.softmax(model(inputs.cuda()), dim=-1)
+        for i in test_data:
+            data = np.array(test_data[i])
+            np.random.shuffle(data)
+            user_list = data[:, 0]
+            item_list = data[:, 1]
+            labels = torch.from_numpy(data[:, 2])
+
+            user = user_list[0]
+
+            user_input, n_idxs = prepare_batch_input(user_list, item_list, user_record, n_item)
+            if torch.cuda.is_available() and args.use_gpu:
+                user_input = torch.from_numpy(np.array(user_input)).cuda()
+                item_input = torch.from_numpy(np.array(item_list)).cuda()
+                n_idx_input = torch.from_numpy(np.array(n_idxs)).cuda()
+
+                outputs = model(outputs = model(user_input, item_input, n_idx_input))
                 outputs = outputs.cpu()
             else:
-                outputs = model(inputs)
-            recommendation_scores = outputs.numpy()[:, 1]  # 预测为1的概率
-            # users = inputs[:, 0]
-            # items = inputs[:, 1]
-            for i in range(length):
-                user, item = inputs.numpy()[i, 0], inputs.numpy()[i, 1]
-                if user not in test_record.keys():
-                    test_record[int(user)] = []
-                test_record[int(user)].append([int(item), float(recommendation_scores[i])])
+                user_input = torch.from_numpy(np.array(user_input))
+                item_input = torch.from_numpy(np.array(item_list))
+                n_idx_input = torch.from_numpy(np.array(n_idxs))
 
-    np.save('test_record.npy', test_record)  # debug fragment
+                outputs = model(outputs=model(user_input, item_input, n_idx_input))
 
-    # eval
-    print()
-    HR = []
-    NDCG = []
-    x = 0
+            recommendation_scores = outputs.numpy()  # 预测为1的概率
+            index = np.argsort(-recommendation_scores)
+            sorted_result = item_list[index]
 
-    for user in test_record.keys():
-        x += 1
-        print('\r', '{}/{}'.format(x, len(test_record)), end='')
-        # dtype = [('itemid', 'int'), ('score', 'float')]
-        ground_truth = list(user_record[int(user)])[0]
-        test_data = np.array(test_record[user])
-        item_score_map = dict()
-        item_ids = test_data[:, 0].astype(np.int)
-        item_reco_scores = test_data[:, 1]
+            ground_truth = test_record[user]
+            position = list(sorted_result).index(ground_truth)
 
-        for i in range(test_data.shape[0]):
-            item_score_map[int(item_ids[i])] = float(item_reco_scores[i])
+            hr = position < 10
+            hit_ratio.append(hr)
+            ndcg.append(math.log(2) / math.log(position + 2) if hr else 0)
 
-        pos_predict = item_score_map[ground_truth]
-        del item_score_map[ground_truth]
-        neg_predict = list(item_score_map.values())
-        position = (np.array(neg_predict) >= pos_predict).sum()
+    hr_result = np.array(hit_ratio).mean()
+    ndcg_result = np.array(ndcg).mean()
+    return hr_result, ndcg_result
 
-        hr = position < 10
-        ndcg = math.log(2) / math.log(position + 2) if hr else 0
-        if hr:
-            hit = 1
-        else:
-            hit = 0
-        del item_score_map
 
-        HR.append(hit)
-        NDCG.append(ndcg)
+def get_test_record(test_data):
+    test_record = {}
+    for i in range(len(test_data)):
+        data = test_data[i]
+        for j in range(data.shape[0]):
+            user = data[j, 0]
+            item = data[j, 1]
+            label = data[j, 2]
+            if label == 1:
+                test_record[user] = item
+    return test_record
 
-    HR_result = np.array(HR).mean()
-    NDCG_result = np.array(NDCG).mean()
-    print()
 
-    return HR_result, NDCG_result
+# def test(args, data):
+#     model_path = '../weights/TSCN_' + args.dataset + '.pth'
+#     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+#     n_item, train_data, test_data = data[0], data[5], data[6]
+#     model = torch.load(model_path)
+#     model.to(device)
+#     user_record = data[7]
+#     # print(1052 in user_record.keys())
+#     hit_ratio, ndcg_score = evaluation(model, test_data, user_record, args, n_item)
+#     print('HR:{:.4f} NDCG:{:.4f}'.format(hit_ratio, ndcg_score))
